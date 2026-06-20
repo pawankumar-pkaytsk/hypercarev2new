@@ -2373,6 +2373,58 @@
   @keyframes hcSpin{ to{ transform:rotate(360deg); } }
   @media (max-width:1024px){ .hc-mini-loader{ top:10px; right:10px; min-width:0; } }
 
+  /* ---- Home bento: EQUAL tiles + glowing accent borders (both themes) ---- */
+  #home-grid{
+    grid-template-columns:repeat(auto-fill, minmax(258px, 1fr)) !important;
+    grid-auto-rows:1fr !important;
+    gap:18px !important;
+    align-items:stretch !important;
+  }
+  /* kill the 2x2 hero span so every tile is the same size */
+  #home-grid .home-tile, #home-grid .home-tile:first-child{
+    grid-column:auto !important; grid-row:auto !important;
+    min-height:196px !important; height:100% !important;
+    padding:22px 22px 56px !important;
+    border:1.5px solid transparent !important; border-radius:22px !important;
+    /* glass fill on the padding box, a fading accent-colour ring on the border box */
+    background:
+      linear-gradient(165deg, var(--glass-2), var(--glass)) padding-box,
+      linear-gradient(150deg, var(--tile-glow, var(--brand-soft)), transparent 58%) border-box !important;
+    -webkit-backdrop-filter:blur(22px) saturate(165%) !important; backdrop-filter:blur(22px) saturate(165%) !important;
+    box-shadow:
+      0 16px 38px -24px rgba(0,0,0,.55),
+      0 0 26px -16px var(--tile-glow, transparent),
+      inset 0 1px 0 var(--glass-hi) !important;
+    transition:transform .45s var(--spring), box-shadow .45s var(--spring-soft), background .35s ease !important;
+  }
+  #home-grid .home-tile:first-child .home-tile-icon{ width:46px !important; height:46px !important; font-size:23px !important; }
+  #home-grid .home-tile:first-child .home-tile-title{ font-size:18px !important; }
+  /* accent-tinted icon chip per tile */
+  #home-grid .home-tile .home-tile-icon{
+    background:linear-gradient(140deg, var(--tile-glow, var(--brand-soft)), transparent) !important;
+    border:1px solid var(--glass-line) !important;
+    box-shadow:0 8px 20px -10px var(--tile-glow, transparent), inset 0 1px 0 var(--glass-hi) !important;
+  }
+  #home-grid .home-tile .home-tile-arrow{
+    background:linear-gradient(140deg, var(--tile-glow, var(--brand-soft)), var(--glass-2)) !important;
+    border:1px solid var(--glass-line) !important;
+  }
+  /* hover: lift + intensify the glow ring */
+  #home-grid .home-tile:hover, #home-grid .home-tile:first-child:hover{
+    transform:translateY(-7px) scale(1.015) !important;
+    background:
+      linear-gradient(165deg, var(--glass-2), var(--glass-2)) padding-box,
+      linear-gradient(150deg, var(--tile-glow, var(--brand)), transparent 78%) border-box !important;
+    box-shadow:
+      0 30px 56px -26px var(--tile-glow, rgba(0,0,0,.5)),
+      0 0 0 1px var(--tile-glow, transparent),
+      inset 0 1px 0 var(--glass-hi) !important;
+  }
+  #home-grid .home-tile:hover .home-tile-icon{ transform:scale(1.1) rotate(-5deg) !important; }
+  #home-grid .home-tile:hover .home-tile-arrow{ transform:translateX(5px) !important; }
+  /* hero a touch more polished */
+  .home-hero-title{ background:linear-gradient(120deg, var(--text), var(--brand) 140%); -webkit-background-clip:text; background-clip:text; }
+
   @media (prefers-reduced-motion: reduce){
     .view.active, #home-grid .home-tile, .signin-card, .signin-glyph, .signin-card::before{ animation:none !important; }
     .nav-indicator{ transition:opacity .2s ease !important; }
@@ -9934,6 +9986,8 @@ function activateTeam(team) {
   if (tabBtn) tabBtn.classList.add("active");
   const view = document.getElementById(`view-${team}`);
   if (view) view.classList.add("active");
+  // The bucket-rules legend is only relevant to the data views — hide it on Home.
+  document.querySelectorAll(".footer-note").forEach(el => { el.style.display = (team === "Home") ? "none" : ""; });
   // Smooth-scroll to top whenever the workspace switches
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (team === "Daily") renderDailyReport();
@@ -9948,6 +10002,8 @@ document.querySelectorAll(".tabs .tab").forEach(btn => {
 document.querySelectorAll("#home-grid .home-tile").forEach(tile => {
   tile.addEventListener("click", () => activateTeam(tile.dataset.team));
 });
+// Home is the default active view on load → hide the data-only bucket-rules legend.
+document.querySelectorAll(".footer-note").forEach(el => { el.style.display = "none"; });
 document.querySelectorAll('#mkt-subtabs .subtab').forEach(btn => btn.addEventListener('click', () => {
   document.querySelectorAll('#mkt-subtabs .subtab').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('#view-Marketing .subview').forEach(v => v.classList.remove('active'));
