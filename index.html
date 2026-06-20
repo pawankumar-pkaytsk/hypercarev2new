@@ -2334,6 +2334,45 @@
   @keyframes v2Orb{ from{ transform:translate(-6%,0) scale(1); } to{ transform:translate(8%,6%) scale(1.15); } }
   @keyframes v2Float{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-6px); } }
 
+  /* ---- Compact top-right loading pill (replaces full-screen boot loader) ---- */
+  .hc-mini-loader{
+    position:fixed; top:16px; right:18px; z-index:300;
+    display:none; align-items:center; gap:11px;
+    padding:10px 14px; min-width:248px; max-width:min(86vw,320px);
+    border-radius:16px;
+    background:var(--glass-2) !important;
+    -webkit-backdrop-filter:blur(30px) saturate(180%); backdrop-filter:blur(30px) saturate(180%);
+    border:1px solid var(--glass-hi);
+    box-shadow:0 18px 44px -18px rgba(0,0,0,.55), inset 0 1px 0 var(--glass-hi);
+    animation:v2CardIn .45s var(--spring) both;
+  }
+  .hc-mini-loader.show{ display:flex; }
+  .hc-mini-spin{
+    width:18px; height:18px; flex:none; border-radius:50%;
+    border:2.5px solid var(--glass-line); border-top-color:var(--brand); border-right-color:var(--brand-2);
+    animation:hcSpin .7s linear infinite;
+  }
+  .hc-mini-body{ flex:1; min-width:0; display:flex; flex-direction:column; gap:5px; }
+  .hc-mini-top{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .hc-mini-title{
+    font-size:12px; font-weight:600; color:var(--text);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .hc-mini-count{ font-size:11px !important; color:var(--text-soft) !important; font-weight:700; flex:none; }
+  .hc-mini-track{
+    height:5px !important; border-radius:999px; overflow:hidden;
+    background:var(--glass-line) !important; margin:0 !important;
+  }
+  .hc-mini-fill{
+    height:100% !important; border-radius:999px;
+    background:linear-gradient(90deg,var(--brand),var(--brand-2)) !important;
+    box-shadow:none !important;
+    transition:width .45s var(--spring-soft) !important;
+  }
+  .hc-mini-pct{ font-size:13px !important; font-weight:800 !important; color:var(--brand) !important; flex:none; font-variant-numeric:tabular-nums; }
+  @keyframes hcSpin{ to{ transform:rotate(360deg); } }
+  @media (max-width:1024px){ .hc-mini-loader{ top:10px; right:10px; min-width:0; } }
+
   @media (prefers-reduced-motion: reduce){
     .view.active, #home-grid .home-tile, .signin-card, .signin-glyph, .signin-card::before{ animation:none !important; }
     .nav-indicator{ transition:opacity .2s ease !important; }
@@ -2360,25 +2399,21 @@
 <!-- Post-signin progress overlay. Shown after OAuth succeeds while sheets are
      fetched in parallel. Hidden as soon as the last sheet resolves, then the
      homepage fades in underneath. -->
-<div id="boot-loader" class="boot-loader" aria-hidden="true">
-  <div class="boot-loader-bg"></div>
-  <div class="boot-loader-card">
-    <div class="boot-loader-logo">
-      <span class="boot-pulse"></span>
-      <span class="boot-pulse boot-pulse-2"></span>
-      <div class="boot-emoji">📊</div>
+<!-- Compact top-right loading pill. The homepage is visible immediately after
+     sign-in; this just shows live-data progress and auto-hides when done.
+     (IDs kept identical to the old full-screen loader so the JS is unchanged.) -->
+<div id="boot-loader" class="hc-mini-loader" aria-hidden="true" role="status">
+  <span class="hc-mini-spin"></span>
+  <div class="hc-mini-body">
+    <div class="hc-mini-top">
+      <span class="hc-mini-title" id="boot-current-sheet">Loading live data…</span>
+      <span class="boot-count hc-mini-count" id="boot-count">0 / 0</span>
     </div>
-    <div class="boot-title">Loading the Hypercare command center</div>
-    <div class="boot-sub" id="boot-current-sheet">Connecting to Google Sheets…</div>
-    <div class="boot-bar-track">
-      <div class="boot-bar-fill" id="boot-bar-fill" style="width:0%;"></div>
-      <div class="boot-bar-shine"></div>
-    </div>
-    <div class="boot-meta">
-      <span class="boot-pct" id="boot-pct">0%</span>
-      <span class="boot-count" id="boot-count">0 / 0 sheets</span>
+    <div class="boot-bar-track hc-mini-track">
+      <div class="boot-bar-fill hc-mini-fill" id="boot-bar-fill" style="width:0%;"></div>
     </div>
   </div>
+  <span class="boot-pct hc-mini-pct" id="boot-pct">0%</span>
 </div>
 <!-- Ambient decorative wireframes (purely visual; non-interactive) -->
 <!-- viewBox 0 0 1400 900 + preserveAspectRatio="xMidYMid slice" lets us use real
@@ -4523,8 +4558,8 @@ function bootLoaderStart(total) {
   root.classList.add('show');
   const fill = bootLoaderEl('boot-bar-fill'); if (fill) fill.style.width = '0%';
   const pct  = bootLoaderEl('boot-pct');      if (pct) pct.textContent = '0%';
-  const cnt  = bootLoaderEl('boot-count');    if (cnt) cnt.textContent = `0 / ${total} sheets`;
-  const sub  = bootLoaderEl('boot-current-sheet'); if (sub) sub.textContent = 'Connecting to Google Sheets…';
+  const cnt  = bootLoaderEl('boot-count');    if (cnt) cnt.textContent = `0 / ${total}`;
+  const sub  = bootLoaderEl('boot-current-sheet'); if (sub) sub.textContent = 'Loading live data…';
   if (_BOOT.hideTimer) { clearTimeout(_BOOT.hideTimer); _BOOT.hideTimer = null; }
 }
 function bootLoaderTick(label) {
@@ -4535,28 +4570,18 @@ function bootLoaderTick(label) {
   const displayPct = Math.min(95, Math.round(ratio * 100));
   const fill = bootLoaderEl('boot-bar-fill'); if (fill) fill.style.width = displayPct + '%';
   const pct  = bootLoaderEl('boot-pct');      if (pct) pct.textContent = displayPct + '%';
-  const cnt  = bootLoaderEl('boot-count');    if (cnt) cnt.textContent = `${_BOOT.done} / ${_BOOT.total} sheets`;
+  const cnt  = bootLoaderEl('boot-count');    if (cnt) cnt.textContent = `${_BOOT.done} / ${_BOOT.total}`;
   const sub  = bootLoaderEl('boot-current-sheet');
-  if (sub && label) sub.textContent = `✓ ${label} loaded`;
+  if (sub && label) sub.textContent = `✓ ${label}`;
 }
 function bootLoaderDone() {
   const fill = bootLoaderEl('boot-bar-fill'); if (fill) fill.style.width = '100%';
   const pct  = bootLoaderEl('boot-pct');      if (pct) pct.textContent = '100%';
-  const cnt  = bootLoaderEl('boot-count');    if (cnt) cnt.textContent = `${_BOOT.total} / ${_BOOT.total} sheets`;
-  const sub  = bootLoaderEl('boot-current-sheet'); if (sub) sub.textContent = 'All set — opening your dashboard…';
+  const cnt  = bootLoaderEl('boot-count');    if (cnt) cnt.textContent = `${_BOOT.total} / ${_BOOT.total}`;
+  const sub  = bootLoaderEl('boot-current-sheet'); if (sub) sub.textContent = 'All set ✓';
   const root = bootLoaderEl('boot-loader');
-  // Hold briefly at 100% so the user sees completion, then fade out
-  _BOOT.hideTimer = setTimeout(() => {
-    if (root) root.classList.remove('show');
-    // Replay the homepage reveal animation
-    const home = document.getElementById('view-Home');
-    if (home && home.classList.contains('active')) {
-      home.classList.remove('boot-reveal');
-      // Force reflow so animation restarts
-      void home.offsetWidth;
-      home.classList.add('boot-reveal');
-    }
-  }, 520);
+  // Hold briefly at 100% so the user sees completion, then fade the pill out.
+  _BOOT.hideTimer = setTimeout(() => { if (root) root.classList.remove('show'); }, 700);
 }
 
 // ============================================================
@@ -4618,7 +4643,9 @@ async function fetchSheets() {
   // Load the static Metabase snapshot first (no auth). Sources present here are
   // served from the snapshot; the rest fall through to Google Sheets below.
   await loadAggregates();
-  const _SHEET_COUNT = 20;  // keep in sync with the number of tryFetch() rows below
+  // Progress counts only sources fetched LIVE from Google — the Metabase
+  // snapshot sources (in HC_AGG) are already loaded, so they don't count.
+  const _SHEET_COUNT = 20 - Object.keys(HC_AGG).length;
   // Suppress the full-screen boot loader for BACKGROUND refreshes — only show
   // it on the very first fetch when there's no cached data on screen. This
   // makes re-opening the dashboard or tab-switching feel instant.
@@ -4641,7 +4668,8 @@ async function fetchSheets() {
   // For a Metabase-snapshot source, skip the Google fetch (return null → the
   // parse step below uses HC_AGG[key] directly). Still ticks the boot loader.
   function fetchOrAgg(key, label) {
-    if (HC_AGG[key]) { if (_showBootLoader) bootLoaderTick(label); return Promise.resolve(null); }
+    // Served from the snapshot → already loaded, no fetch + not counted.
+    if (HC_AGG[key]) return Promise.resolve(null);
     return tryFetch(key, label);
   }
   const [
