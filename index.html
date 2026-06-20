@@ -4559,6 +4559,49 @@ function bootLoaderDone() {
   }, 520);
 }
 
+// ============================================================
+// ✦ V2 Metabase snapshot loader
+// Loads pre-parsed source objects from static mb/*.json — produced server-side
+// by the snapshot pipeline (Metabase card → mb/parsers.mjs → JSON). For these
+// sources the dashboard SKIPS the Google fetch + client-side parse entirely
+// (faster + no per-sheet API call). Any source missing from the snapshot falls
+// back to the live Google Sheets path, so this degrades gracefully.
+// Date objects are serialized as {"$date": epochMs}; we rehydrate on load.
+// ============================================================
+const MB_AGG_KEYS = ["calling","tasks","troubleshoot","chatReply","unassignment","dailyARR","experimental","callContext","gcv3Dump","dailyMetrics"];
+let HC_AGG = {};
+let HC_AGG_LOADED = false;
+function _reviveDates(v) {
+  if (v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = _reviveDates(v[i]); return v; }
+  const keys = Object.keys(v);
+  if (keys.length === 1 && keys[0] === "$date") return new Date(v.$date);
+  for (const k of keys) v[k] = _reviveDates(v[k]);
+  return v;
+}
+async function loadAggregates() {
+  if (HC_AGG_LOADED) return HC_AGG;
+  HC_AGG_LOADED = true;
+  let manifest = null;
+  try {
+    const r = await fetch("mb/agg-manifest.json", { cache: "no-store" });
+    if (r.ok) manifest = await r.json();
+  } catch (e) {}
+  if (!manifest || !manifest.sources) return HC_AGG;
+  const keys = MB_AGG_KEYS.filter(k => manifest.sources[k] && !manifest.sources[k].error);
+  await Promise.all(keys.map(async k => {
+    try {
+      const r = await fetch(`mb/${k}.json`, { cache: "no-store" });
+      if (!r.ok) return;
+      HC_AGG[k] = _reviveDates(await r.json());
+    } catch (e) { console.warn(`[agg] ${k} load failed:`, e.message); }
+  }));
+  const got = Object.keys(HC_AGG);
+  if (got.length) console.log(`[agg] Metabase snapshot: ${got.length} sources [${got.join(", ")}]` + (manifest.generatedAt ? ` · ${manifest.generatedAt}` : ""));
+  window.HC_AGG = HC_AGG;
+  return HC_AGG;
+}
+
 async function fetchSheets() {
   // ============================================================
   // PARALLEL FETCH — all sheets in flight at once.
@@ -4572,6 +4615,9 @@ async function fetchSheets() {
   // ============================================================
   LAST_FETCH_ERRORS = [];
   setStatus("loading", "Loading…");
+  // Load the static Metabase snapshot first (no auth). Sources present here are
+  // served from the snapshot; the rest fall through to Google Sheets below.
+  await loadAggregates();
   const _SHEET_COUNT = 20;  // keep in sync with the number of tryFetch() rows below
   // Suppress the full-screen boot loader for BACKGROUND refreshes — only show
   // it on the very first fetch when there's no cached data on screen. This
@@ -4592,30 +4638,36 @@ async function fetchSheets() {
   }
   // Make _showBootLoader visible to refresh() so it can decide whether to call bootLoaderDone
   fetchSheets._lastShowedLoader = _showBootLoader;
+  // For a Metabase-snapshot source, skip the Google fetch (return null → the
+  // parse step below uses HC_AGG[key] directly). Still ticks the boot loader.
+  function fetchOrAgg(key, label) {
+    if (HC_AGG[key]) { if (_showBootLoader) bootLoaderTick(label); return Promise.resolve(null); }
+    return tryFetch(key, label);
+  }
   const [
     h, c, rRaw, tRaw, tsRaw, crRaw, uRaw, rfRaw,
     ccRaw, arrRaw, exRaw, rtRaw, msRaw,
     hbmRaw, hmRaw, haRaw, haiRaw, gcRaw, dmRaw, crvRaw,
   ] = await Promise.all([
     tryFetch("hypercare",            "Hypercare Metrics"),
-    tryFetch("calling",              "Calling sheet"),
+    fetchOrAgg("calling",            "Calling sheet"),
     tryFetch("revived",              "Revived sheet"),
-    tryFetch("tasks",                "Tasks sheet"),
-    tryFetch("troubleshoot",         "Troubleshoot sheet"),
-    tryFetch("chatReply",            "Chat Reply sheet"),
-    tryFetch("unassignment",         "Unassignment sheet"),
+    fetchOrAgg("tasks",              "Tasks sheet"),
+    fetchOrAgg("troubleshoot",       "Troubleshoot sheet"),
+    fetchOrAgg("chatReply",          "Chat Reply sheet"),
+    fetchOrAgg("unassignment",       "Unassignment sheet"),
     tryFetch("remainingFunds",       "Remaining Funds sheet"),
-    tryFetch("callContext",          "Call Context sheet"),
-    tryFetch("dailyARR",             "Daily ARR sheet"),
-    tryFetch("experimental",         "Experimental Sellers sheet"),
+    fetchOrAgg("callContext",        "Call Context sheet"),
+    fetchOrAgg("dailyARR",           "Daily ARR sheet"),
+    fetchOrAgg("experimental",       "Experimental Sellers sheet"),
     tryFetch("revivalTrack",         "Revival Track sheet"),
     tryFetch("mspRecovery",          "MSP Recovery sheet"),
     tryFetch("hitsBeforeMarchCohort","HITS Before March Cohort sheet"),
     tryFetch("hitsMarchCohort",      "HITS March Cohort sheet"),
     tryFetch("hitsAprilCohort",      "HITS April Cohort sheet"),
     tryFetch("hitsAprilInactiveCohort","HITS April Inactive Cohort sheet"),
-    tryFetch("gcv3Dump",             "GCV3 Dump sheet"),
-    tryFetch("dailyMetrics",         "Daily Metrics sheet"),
+    fetchOrAgg("gcv3Dump",           "GCV3 Dump sheet"),
+    fetchOrAgg("dailyMetrics",       "Daily Metrics sheet"),
     (async () => {
       // Special path: auto-detect the correct tab name if "Tracker" doesn't work.
       try {
@@ -4656,21 +4708,21 @@ async function fetchSheets() {
 
   const revived = safeParse("Revived", rRaw, processRevivedCSV,
     { rows: [], lifetime: 0, weekList: [], earliest: null, latest: null, headers: [] });
-  const tasks = safeParse("Tasks", tRaw, processTasksCSV,
+  const tasks = HC_AGG.tasks || safeParse("Tasks", tRaw, processTasksCSV,
     { rows: [], count: 0 });
-  const troubleshoot = safeParse("Troubleshoot", tsRaw, processTroubleshootCSV,
+  const troubleshoot = HC_AGG.troubleshoot || safeParse("Troubleshoot", tsRaw, processTroubleshootCSV,
     { rows: [], count: 0 });
-  const chatReply = safeParse("Chat Reply", crRaw, processChatReplyCSV,
+  const chatReply = HC_AGG.chatReply || safeParse("Chat Reply", crRaw, processChatReplyCSV,
     { bySeller: {}, count: 0 });
-  const unassignment = safeParse("Unassignment", uRaw, processUnassignmentCSV,
+  const unassignment = HC_AGG.unassignment || safeParse("Unassignment", uRaw, processUnassignmentCSV,
     { rows: [], count: 0 });
   const remainingFunds = safeParse("Remaining Funds", rfRaw, processRemainingFundsCSV,
     { bySeller: {}, count: 0 });
-  const callContext = safeParse("Call Context", ccRaw, processCallContextCSV,
+  const callContext = HC_AGG.callContext || safeParse("Call Context", ccRaw, processCallContextCSV,
     { rows: [], count: 0 });
-  const dailyARR = safeParse("Daily ARR", arrRaw, processDailyARRCSV,
+  const dailyARR = HC_AGG.dailyARR || safeParse("Daily ARR", arrRaw, processDailyARRCSV,
     { bySeller: {}, count: 0 });
-  const experimental = safeParse("Experimental", exRaw, processExperimentalCSV,
+  const experimental = HC_AGG.experimental || safeParse("Experimental", exRaw, processExperimentalCSV,
     { sellerIds: [], count: 0 });
   const revivalTrack = safeParse("Revival Track", rtRaw, processRevivalTrackCSV,
     { rows: [], count: 0 });
@@ -4690,9 +4742,9 @@ async function fetchSheets() {
   const hitsAprilInactiveCohort = safeParse("HITS April Inactive Cohort", haiRaw,
     (text) => processHITSCohortCSV(text, { idOnly: true }),
     { bySeller: {}, sellerIds: [], count: 0 });
-  const gcv3Dump = safeParse("GCV3 Dump", gcRaw, processGCV3DumpCSV,
+  const gcv3Dump = HC_AGG.gcv3Dump || safeParse("GCV3 Dump", gcRaw, processGCV3DumpCSV,
     { bySeller: {}, count: 0 });
-  const dailyMetrics = safeParse("Daily Metrics", dmRaw, processDailyMetricsCSV,
+  const dailyMetrics = HC_AGG.dailyMetrics || safeParse("Daily Metrics", dmRaw, processDailyMetricsCSV,
     { bySeller: {}, count: 0 });
   const creatives = safeParse("Creatives Tracker", crvRaw, processCreativesCSV,
     { rows: [], count: 0, pending: 0, completed: 0 });
@@ -4704,7 +4756,9 @@ async function fetchSheets() {
   }
   const hyp = processHypercareCSV(h);
   let calls;
-  if (c) {
+  if (HC_AGG.calling) {
+    calls = HC_AGG.calling;
+  } else if (c) {
     try { calls = processCallingCSV(c); }
     catch (e) {
       console.warn("Calling CSV parse failed (non-fatal):", e.message);
